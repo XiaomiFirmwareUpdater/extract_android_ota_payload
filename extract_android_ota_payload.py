@@ -11,7 +11,7 @@ import zipfile
 from google.protobuf import message
 
 # from https://android.googlesource.com/platform/system/update_engine/+/refs/heads/master/scripts/update_payload/
-import update_metadata_pb2
+from . import update_metadata_pb2
 
 PROGRAMS = [ 'bzcat', 'xzcat' ]
 
