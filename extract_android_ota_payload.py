@@ -8,6 +8,7 @@ import struct
 import subprocess
 import sys
 import zipfile
+from google.protobuf import message
 
 # from https://android.googlesource.com/platform/system/update_engine/+/refs/heads/master/scripts/update_payload/
 import update_metadata_pb2
@@ -66,7 +67,10 @@ class Payload(object):
     self.header.ReadFromPayload(self.payload_file)
     manifest_raw = self._ReadManifest()
     self.manifest = update_metadata_pb2.DeltaArchiveManifest()
-    self.manifest.ParseFromString(manifest_raw)
+    try:
+        self.manifest.ParseFromString(manifest_raw)
+    except message.DecodeError as parse_error:
+        print("[WARN] Cannot deserialize Protobuf. Reason: {}".format(parse_error))
     metadata_signature_raw = self._ReadMetadataSignature()
     if metadata_signature_raw:
       self.metadata_signature = update_metadata_pb2.Signatures()
