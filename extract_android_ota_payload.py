@@ -2,18 +2,15 @@
 
 import hashlib
 import os
-import os.path
-import shutil
+from pathlib import Path
 import struct
 import subprocess
-import sys
-import zipfile
+from zipfile import ZipFile
+
 from google.protobuf import message
 
 # from https://android.googlesource.com/platform/system/update_engine/+/refs/heads/master/scripts/update_payload/
 from . import update_metadata_pb2
-
-PROGRAMS = [ 'bzcat', 'xzcat' ]
 
 BRILLO_MAJOR_PAYLOAD_VERSION = 2
 
@@ -33,13 +30,13 @@ class Payload(object):
     def ReadFromPayload(self, payload_file):
       magic = payload_file.read(4)
       if magic != self._MAGIC:
-        raise PayloadError('Invalid payload magic: %s' % magic)
+        raise PayloadError(f'Invalid payload magic: {magic}')
       self.version = struct.unpack('>Q', payload_file.read(8))[0]
       self.manifest_len = struct.unpack('>Q', payload_file.read(8))[0]
       self.size = 20
       self.metadata_signature_len = 0
       if self.version != BRILLO_MAJOR_PAYLOAD_VERSION:
-        raise PayloadError('Unsupported payload version (%d)' % self.version)
+        raise PayloadError(f'Unsupported payload version ({self.version})')
       self.size += 4
       self.metadata_signature_len = struct.unpack('>I', payload_file.read(4))[0]
 
@@ -56,7 +53,7 @@ class Payload(object):
 
   def _ReadMetadataSignature(self):
     self.payload_file.seek(self.header.size + self.header.manifest_len)
-    return self.payload_file.read(self.header.metadata_signature_len);
+    return self.payload_file.read(self.header.metadata_signature_len)
 
   def ReadDataBlob(self, offset, length):
     self.payload_file.seek(self.data_offset + offset)
@@ -70,7 +67,7 @@ class Payload(object):
     try:
         self.manifest.ParseFromString(manifest_raw)
     except message.DecodeError as parse_error:
-        print("[WARN] Cannot deserialize Protobuf. Reason: {}".format(parse_error))
+        print(f"[WARN] Cannot deserialize Protobuf. Reason: {parse_error}")
     metadata_signature_raw = self._ReadMetadataSignature()
     if metadata_signature_raw:
       self.metadata_signature = update_metadata_pb2.Signatures()
@@ -82,7 +79,7 @@ def decompress_payload(command, data, size, hash):
   p = subprocess.Popen([command, '-'], stdout=subprocess.PIPE, stdin=subprocess.PIPE)
   r = p.communicate(data)[0]
   if len(r) != size:
-    print("Unexpected size %d %d" % (len(r), size))
+    print(f"Unexpected size {len(r)} {size}")
   elif hashlib.sha256(data).digest() != hash:
     print("Hash mismatch")
   return r
@@ -104,14 +101,12 @@ def parse_payload(payload_f, partition, out_f):
     elif operation.type == update_metadata_pb2.InstallOperation.ZERO:
       out_f.write(b'\x00' * (e.num_blocks * BLOCK_SIZE))
     else:
-      raise PayloadError('Unhandled operation type ({} - {})'.format(operation.type,
-                         update_metadata_pb2.InstallOperation.Type.Name(operation.type)))
+      raise PayloadError(f'Unhandled operation type ({operation.type} - {update_metadata_pb2.InstallOperation.Type.Name(operation.type)})')
 
-def main(filename, output_dir):
-  if filename.endswith('.zip'):
+def extract_android_ota_payload(filename: Path, output_dir: Path):
+  if filename.suffix == '.zip':
     print("Extracting 'payload.bin' from OTA file...")
-    ota_zf = zipfile.ZipFile(filename)
-    payload_file = open(ota_zf.extract('payload.bin', output_dir), 'rb')
+    payload_file = open(ZipFile(filename).extract('payload.bin', output_dir), 'rb')
   else:
     payload_file = open(filename, 'rb')
 
@@ -119,30 +114,13 @@ def main(filename, output_dir):
   payload.Init()
 
   for p in payload.manifest.partitions:
-    name = p.partition_name + '.img'
-    print("Extracting '%s'" % name)
-    fname = os.path.join(output_dir, name)
+    name = f"{p.partition_name}.img"
+    print(f"Extracting '{name}'")
+    fname = output_dir / name
     out_f = open(fname, 'wb')
     try:
       parse_payload(payload, p, out_f)
     except PayloadError as e:
-      print('Failed: %s' % e)
+      print(f'Failed: {e}')
       out_f.close()
       os.unlink(fname)
-
-if __name__ == '__main__':
-  try:
-    filename = sys.argv[1]
-  except:
-    print('Usage: %s payload.bin [output_dir]' % sys.argv[0])
-    sys.exit()
-
-  try:
-    output_dir = sys.argv[2]
-  except IndexError:
-    output_dir = os.getcwd()
-
-  if not os.path.exists(output_dir):
-    os.makedirs(output_dir)
-
-  main(filename, output_dir)
